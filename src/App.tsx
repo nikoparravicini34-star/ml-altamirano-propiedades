@@ -23,8 +23,6 @@ const Contact = lazy(() => import('./pages/public/Contact'));
 const UserProfile = lazy(() => import('./pages/public/UserProfile'));
 const Dashboard = lazy(() => import('./pages/admin/Dashboard'));
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-
 function PageFallback() {
   return (
     <div className="min-h-[50vh] flex items-center justify-center">
@@ -98,17 +96,6 @@ function OAuthRedirectHandler() {
 
 function AppRoutes() {
   useSmoothScroll();
-
-  useEffect(() => {
-    const origin = window.location.origin;
-    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-    if (isLocalhost) return;
-
-    fetch(`${SUPABASE_URL}/functions/v1/auth-setup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }).catch(() => {});
-  }, []);
 
   return (
     <>

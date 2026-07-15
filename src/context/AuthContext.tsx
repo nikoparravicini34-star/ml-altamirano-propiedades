@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import { getUserProfile, upsertUserProfile, updateUserProfile } from '../lib/supabase';
+import { getUserProfile, upsertUserProfile, updateUserProfile, syncSuperAdminRole } from '../lib/supabase';
 import { supabase, getOAuthRedirectUrl } from '../lib/supabaseClient';
 import { getOAuthCallbackSnapshot, logAuthDebug } from '../lib/authDebug';
 import { resolveRoleForEmail, isStaff, isSuperAdmin } from '../lib/roles';
@@ -49,9 +49,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
 
-  const loadProfile = async (u: User): Promise<void> => {
+  const profileLoadIdRef = useRef(0);
+
+  const applySession = useCallback((s: Session | null) => {
+    setSession(s);
+    setUser(s?.user ?? null);
+    setIsAuthenticated(!!s?.user);
+    if (!s?.user) setProfile(null);
+  }, []);
+
+  const loadProfile = useCallback(async (u: User): Promise<void> => {
     try {
+      await syncSuperAdminRole();
+
       let p = await getUserProfile(u.id);
       const email = u.email ?? null;
 
@@ -67,10 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
 
         try {
-          p = await upsertUserProfile({
-            ...base,
-            email,
-          });
+          p = await upsertUserProfile({ ...base, email });
         } catch (createErr) {
           console.warn('Full profile create failed, retrying minimal:', createErr);
           try {
@@ -81,7 +90,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
-        const desiredRole = resolveRoleForEmail(email ?? undefined, p.role);
         if (email && p.email !== email) {
           try {
             const updated = await updateUserProfile(u.id, { email });
@@ -92,9 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        if (desiredRole === 'super_admin' && p.role !== 'super_admin') {
-          p = { ...p, role: 'super_admin' };
-        }
+        p = await getUserProfile(u.id) ?? p;
       }
 
       if (!p) {
@@ -102,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (p.is_blocked === true) {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' });
         setProfile(null);
         setIsAuthenticated(false);
         setUser(null);
@@ -115,139 +121,112 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error('Error loading profile:', err);
       setProfile(buildProfileFromUser(u));
     }
-  };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
-
-    const applySession = (s: Session | null) => {
-      if (!mounted) return;
-      setSession(s);
-      setUser(s?.user ?? null);
-      setIsAuthenticated(!!s);
-      if (!s?.user) setProfile(null);
-    };
+    let sawInitialSession = false;
+    let pendingOAuth = false;
 
     const callbackSnapshot = getOAuthCallbackSnapshot();
     logAuthDebug('AuthProvider mount — callback snapshot', callbackSnapshot);
 
+    if (callbackSnapshot.inBrowser) {
+      pendingOAuth = callbackSnapshot.hasCode && !callbackSnapshot.oauthError;
+    }
+
+    const finishLoadingWithoutUser = () => {
+      if (mounted) setIsLoading(false);
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      if (!mounted) return;
+
       logAuthDebug('onAuthStateChange', {
         event,
         user: s?.user
           ? { id: s.user.id, email: s.user.email, provider: s.user.app_metadata?.provider }
           : null,
         hasSession: Boolean(s),
-        accessTokenPreview: s?.access_token ? `${s.access_token.slice(0, 12)}…` : null,
       });
+
+      // Never call async Supabase methods inside this callback — update state only.
       applySession(s);
 
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
-        if (!s?.user) setIsLoading(false);
+      if (event === 'INITIAL_SESSION') {
+        sawInitialSession = true;
+        setAuthInitialized(true);
+        pendingOAuth = false;
+        if (!s?.user) finishLoadingWithoutUser();
+      }
+
+      if (event === 'SIGNED_IN' && s?.user) {
+        setAuthInitialized(true);
+        pendingOAuth = false;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        pendingOAuth = false;
+        finishLoadingWithoutUser();
       }
     });
 
-    const initAuth = async () => {
-      try {
-        const { data: { session: initialSession }, error } = await supabase.auth.getSession();
+    const fallbackTimer = window.setTimeout(async () => {
+      if (!mounted || sawInitialSession) return;
 
-        logAuthDebug('getSession() after init', {
-          session: initialSession
-            ? {
-                userId: initialSession.user.id,
-                email: initialSession.user.email,
-                expiresAt: initialSession.expires_at,
-              }
-            : null,
-          error: error?.message ?? null,
-        });
+      logAuthDebug('INITIAL_SESSION timeout — fallback getSession()');
 
-        if (error) {
-          console.error('Error restoring session:', error.message);
-          logAuthDebug('getSession error', error);
-        }
+      const { data: { session: fallbackSession }, error } = await supabase.auth.getSession();
+      if (!mounted) return;
 
-        if (callbackSnapshot.inBrowser && callbackSnapshot.oauthError) {
-          logAuthDebug('OAuth callback error in URL', {
-            error: callbackSnapshot.oauthError,
-            description: callbackSnapshot.oauthErrorDescription,
-          });
-        }
+      sawInitialSession = true;
+      setAuthInitialized(true);
+      applySession(fallbackSession);
 
-        applySession(initialSession);
-
-        let resolvedSession = initialSession;
-
-        if (
-          !resolvedSession &&
-          callbackSnapshot.inBrowser &&
-          callbackSnapshot.hasCode
-        ) {
-          logAuthDebug('PKCE code in URL but no session — retrying exchangeCodeForSession', {
-            hasCodeVerifier: callbackSnapshot.hasCodeVerifier,
-            pkceReady: callbackSnapshot.pkceReady,
-          });
-
-          const code = new URL(window.location.href).searchParams.get('code');
-          if (code) {
-            const { data: exchangeData, error: exchangeError } =
-              await supabase.auth.exchangeCodeForSession(code);
-
-            logAuthDebug('exchangeCodeForSession result', {
-              session: exchangeData.session
-                ? {
-                    userId: exchangeData.session.user.id,
-                    email: exchangeData.session.user.email,
-                  }
-                : null,
-              error: exchangeError
-                ? {
-                    message: exchangeError.message,
-                    name: exchangeError.name,
-                    status: 'status' in exchangeError ? exchangeError.status : undefined,
-                  }
-                : null,
-            });
-
-            if (exchangeError) {
-              console.error('[Auth Debug] OAuth code exchange failed:', exchangeError.message);
-            } else if (exchangeData.session) {
-              resolvedSession = exchangeData.session;
-              applySession(exchangeData.session);
-            }
-          }
-        }
-
-        if (!resolvedSession) {
-          setIsLoading(false);
-        }
-      } catch (err) {
-        console.error('Auth initialization failed:', err);
-        logAuthDebug('initAuth exception', err);
-        if (mounted) setIsLoading(false);
+      if (error) {
+        console.error('Error restoring session:', error.message);
+        logAuthDebug('getSession fallback error', error);
       }
-    };
 
-    void initAuth();
+      if (!fallbackSession?.user) {
+        finishLoadingWithoutUser();
+      }
+    }, pendingOAuth ? 8000 : 3000);
+
+    const oauthTimeout = pendingOAuth
+      ? window.setTimeout(() => {
+          if (!mounted || !pendingOAuth) return;
+          logAuthDebug('OAuth exchange timeout — stopping loader');
+          pendingOAuth = false;
+          finishLoadingWithoutUser();
+        }, 12000)
+      : undefined;
 
     return () => {
       mounted = false;
+      clearTimeout(fallbackTimer);
+      if (oauthTimeout) clearTimeout(oauthTimeout);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [applySession]);
 
   useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
+    if (!authInitialized) return;
+
+    if (!user?.id || !session) {
+      if (!user) setIsLoading(false);
+      return;
+    }
+
+    const loadId = ++profileLoadIdRef.current;
+    setIsLoading(true);
 
     void loadProfile(user).finally(() => {
-      if (!cancelled) setIsLoading(false);
+      if (profileLoadIdRef.current === loadId) {
+        setIsLoading(false);
+      }
     });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authInitialized, user?.id, session?.access_token, loadProfile, user, session]);
 
   const refreshProfile = async () => {
     if (user) await loadProfile(user);

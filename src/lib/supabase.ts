@@ -208,6 +208,14 @@ export async function getUserProfile(userId: string) {
   return data as UserProfile | null;
 }
 
+/** Promotes the configured super-admin email in the database (server-side, SECURITY DEFINER). */
+export async function syncSuperAdminRole(): Promise<void> {
+  const { error } = await supabase.rpc('sync_super_admin_role');
+  if (error) {
+    console.warn('Could not sync super admin role:', error.message);
+  }
+}
+
 function toProfileError(error: unknown): Error {
   if (error instanceof Error) return error;
   if (error && typeof error === 'object' && 'message' in error) {

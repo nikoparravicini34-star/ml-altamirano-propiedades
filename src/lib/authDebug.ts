@@ -1,7 +1,8 @@
-/** Temporary OAuth diagnostics — remove after fixing auth. */
+/** OAuth diagnostics — only logs in development builds. */
 const PREFIX = '[Auth Debug]';
 
 export function logAuthDebug(label: string, payload?: unknown) {
+  if (!import.meta.env.DEV) return;
   if (payload === undefined) {
     console.log(`${PREFIX} ${label}`);
     return;
