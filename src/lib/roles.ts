@@ -1,7 +1,5 @@
 import type { UserRole } from '../types';
 
-export const SUPER_ADMIN_EMAIL = 'nikoparravicini34@gmail.com';
-
 export const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Super Administrador',
   admin: 'Administrador',
@@ -55,9 +53,4 @@ export function canManageInquiries(role: UserRole | null | undefined): boolean {
 
 export function canManageProperties(role: UserRole | null | undefined): boolean {
   return isStaff(role);
-}
-
-export function resolveRoleForEmail(email: string | undefined, currentRole?: UserRole): UserRole {
-  if (email && email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return 'super_admin';
-  return currentRole ?? 'user';
 }

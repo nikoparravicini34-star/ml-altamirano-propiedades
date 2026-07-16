@@ -3,7 +3,7 @@ import type { User, Session } from '@supabase/supabase-js';
 import { getUserProfile, upsertUserProfile, updateUserProfile, syncSuperAdminRole } from '../lib/supabase';
 import { supabase, getOAuthRedirectUrl } from '../lib/supabaseClient';
 import { getOAuthCallbackSnapshot, logAuthDebug } from '../lib/authDebug';
-import { resolveRoleForEmail, isStaff, isSuperAdmin } from '../lib/roles';
+import { isStaff, isSuperAdmin } from '../lib/roles';
 import type { UserProfile, UserRole } from '../types';
 
 export type LoginWithGoogleError = 'oauth_error';
@@ -35,7 +35,7 @@ function buildProfileFromUser(u: User): UserProfile {
     full_name: u.user_metadata?.full_name ?? u.user_metadata?.name ?? null,
     phone: null,
     avatar_url: u.user_metadata?.avatar_url ?? u.user_metadata?.picture ?? null,
-    role: resolveRoleForEmail(u.email) ?? 'user',
+    role: 'user',
     is_blocked: false,
     profile_completed: false,
     created_at: now,
@@ -62,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async (u: User): Promise<void> => {
     try {
+      // Sync super-admin role server-side (uses auth.users.email as source of truth)
       await syncSuperAdminRole();
 
       let p = await getUserProfile(u.id);
@@ -89,19 +90,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             p = buildProfileFromUser(u);
           }
         }
-      } else {
-        if (email && p.email !== email) {
-          try {
-            const updated = await updateUserProfile(u.id, { email });
-            p = updated ?? { ...p, email };
-          } catch (metaErr) {
-            console.warn('Could not update profile email:', metaErr);
-            p = { ...p, email };
-          }
+      } else if (email && p.email !== email) {
+        try {
+          const updated = await updateUserProfile(u.id, { email });
+          p = updated ?? { ...p, email };
+        } catch (metaErr) {
+          console.warn('Could not update profile email:', metaErr);
+          p = { ...p, email };
         }
-
-        p = await getUserProfile(u.id) ?? p;
       }
+
+      // Re-sync after profile row exists, then always re-fetch role from database
+      await syncSuperAdminRole();
+      p = await getUserProfile(u.id) ?? p;
 
       if (!p) {
         p = buildProfileFromUser(u);
@@ -264,7 +265,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   };
 
-  const role = resolveRoleForEmail(user?.email, profile?.role) ?? profile?.role ?? 'user';
+  // Role comes exclusively from Supabase user_profiles — never from localStorage or client overrides
+  const role: UserRole = profile?.role ?? 'user';
   const profileCompleted = !!profile?.profile_completed;
 
   return (

@@ -23,7 +23,7 @@ function Navbar() {
   const rafRef = useRef(0);
   const location = useLocation();
   const navigate = useNavigate();
-  const { isAuthenticated, user, profile, logout, role, profileCompleted } = useAuth();
+  const { isAuthenticated, isLoading, user, profile, logout, role, profileCompleted } = useAuth();
   const { openProfileModal } = useProfileModal();
   const { settings } = useSiteSettings();
 
@@ -178,7 +178,7 @@ function Navbar() {
           <div className="hidden lg:flex items-center gap-5 shrink-0">
             {isAuthenticated ? (
               <>
-                {canShowAdminButton(role) && (
+                {!isLoading && canShowAdminButton(role) && (
                   <Link
                     to="/admin/propiedades"
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-[10px] font-semibold tracking-[0.12em] uppercase rounded-xl border border-accent/50 text-accent hover:bg-accent hover:text-white transition-all duration-300"
@@ -246,7 +246,7 @@ function Navbar() {
                             <Settings size={13} strokeWidth={1.75} className="text-accent" />
                             Configuración
                           </button>
-                          {canShowAdminButton(role) && (
+                          {!isLoading && canShowAdminButton(role) && (
                             <Link
                               to="/admin/propiedades"
                               onClick={() => setProfileOpen(false)}
@@ -312,19 +312,31 @@ function Navbar() {
 
               <div className="pt-6 pb-1 space-y-3">
                 {isAuthenticated ? (
-                  <div className="flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={goToProfile}
-                      className="flex items-center gap-2 text-[10.5px] font-semibold text-white hover:text-accent transition-colors"
-                    >
-                      <User size={13} strokeWidth={1.75} className="text-accent" />
-                      Mi perfil
-                    </button>
-                    <button onClick={handleLogout} className="text-[10.5px] text-text-light hover:text-red-400 transition-colors">
-                      Cerrar sesión
-                    </button>
-                  </div>
+                  <>
+                    {!isLoading && canShowAdminButton(role) && (
+                      <Link
+                        to="/admin/propiedades"
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className="flex items-center gap-2 py-3 text-[10.5px] font-semibold tracking-[0.12em] uppercase text-accent border-b border-white/8"
+                      >
+                        <Shield size={13} strokeWidth={1.75} />
+                        Panel de Administración
+                      </Link>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={goToProfile}
+                        className="flex items-center gap-2 text-[10.5px] font-semibold text-white hover:text-accent transition-colors"
+                      >
+                        <User size={13} strokeWidth={1.75} className="text-accent" />
+                        Mi perfil
+                      </button>
+                      <button onClick={handleLogout} className="text-[10.5px] text-text-light hover:text-red-400 transition-colors">
+                        Cerrar sesión
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <GoogleLoginButton variant="navbar" onDark />
                 )}
