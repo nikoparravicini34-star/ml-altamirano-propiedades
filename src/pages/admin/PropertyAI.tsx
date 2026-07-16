@@ -7,7 +7,6 @@ import {
   AlertCircle,
   ArrowRight,
   Upload,
-  Trash2,
   Video,
   Image as ImageIcon,
   MapPin,
@@ -25,6 +24,14 @@ import {
   deleteStorageFile,
 } from '../../lib/supabase';
 import { PROPERTY_TYPES, CURRENCIES, OPERATIONS } from '../../data/constants';
+import SortableMediaList from '../../components/admin/SortableMediaList';
+import {
+  buildMediaItems,
+  splitMediaItems,
+  syncMediaOrder,
+  annotateDisplayOrder,
+  type MediaItem,
+} from '../../lib/mediaOrder';
 
 const emptyPrefill: Partial<Property> = {
   title: '',
@@ -113,6 +120,7 @@ function editableToProperty(
   editable: AIEditablePreview,
   photos: string[],
   videos: string[],
+  mediaOrder: string[],
 ): Partial<Property> {
   return {
     ...emptyPrefill,
@@ -137,6 +145,7 @@ function editableToProperty(
     full_description: editable.full_description ?? '',
     photos,
     videos,
+    media_order: mediaOrder,
     latitude: editable.latitude ?? null,
     longitude: editable.longitude ?? null,
     address: editable.address ?? null,
@@ -157,6 +166,7 @@ type PropertyAIDraft = {
   };
   photos: string[];
   videos: string[];
+  mediaOrder: string[];
   editable: AIEditablePreview | null;
 };
 
@@ -179,6 +189,7 @@ export default function PropertyAI() {
   });
   const [photos, setPhotos] = useState<string[]>([]);
   const [videos, setVideos] = useState<string[]>([]);
+  const [mediaOrder, setMediaOrder] = useState<string[]>([]);
   const [editable, setEditable] = useState<AIEditablePreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +203,7 @@ export default function PropertyAI() {
 
   const { clearDraft } = useFormDraft<PropertyAIDraft>(
     draftKey,
-    { description, savedLocation, locationFields, photos, videos, editable },
+    { description, savedLocation, locationFields, photos, videos, mediaOrder, editable },
     {
       enabled: !loading,
       isEmpty: isPropertyAIEmpty,
@@ -202,10 +213,24 @@ export default function PropertyAI() {
         setLocationFields(draft.locationFields);
         setPhotos(draft.photos);
         setVideos(draft.videos);
+        setMediaOrder(draft.mediaOrder ?? syncMediaOrder(draft.photos, draft.videos));
         setEditable(draft.editable);
       },
     },
   );
+
+  const applyMediaState = (nextPhotos: string[], nextVideos: string[], nextOrder: string[]) => {
+    setPhotos(nextPhotos);
+    setVideos(nextVideos);
+    setMediaOrder(nextOrder);
+  };
+
+  const mediaItems = annotateDisplayOrder(buildMediaItems(photos, videos, mediaOrder));
+
+  const handleMediaReorder = (items: MediaItem[]) => {
+    const { photos: nextPhotos, videos: nextVideos, mediaOrder: nextOrder } = splitMediaItems(items);
+    applyMediaState(nextPhotos, nextVideos, nextOrder);
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -219,7 +244,9 @@ export default function PropertyAI() {
           prev.map((item, i) => (i === index ? { ...item, percent } : item)),
         );
       });
-      setPhotos((prev) => [...prev, ...urls]);
+      const nextPhotos = [...photos, ...urls];
+      const nextOrder = syncMediaOrder(nextPhotos, videos, mediaOrder);
+      applyMediaState(nextPhotos, videos, nextOrder);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al subir las imágenes.');
     } finally {
@@ -241,7 +268,9 @@ export default function PropertyAI() {
           prev.map((item, i) => (i === index ? { ...item, percent } : item)),
         );
       });
-      setVideos((prev) => [...prev, ...urls]);
+      const nextVideos = [...videos, ...urls];
+      const nextOrder = syncMediaOrder(photos, nextVideos, mediaOrder);
+      applyMediaState(photos, nextVideos, nextOrder);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al subir los videos.');
     } finally {
@@ -251,28 +280,19 @@ export default function PropertyAI() {
     }
   };
 
-  const removePhoto = async (index: number) => {
-    const photo = photos[index];
-    if (photo) {
-      try {
-        await deleteStorageFile(photo);
-      } catch (err) {
-        console.warn('No se pudo eliminar la imagen del almacenamiento:', err);
-      }
-    }
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-  };
+  const removeMedia = async (index: number) => {
+    const item = mediaItems[index];
+    if (!item) return;
 
-  const removeVideo = async (index: number) => {
-    const video = videos[index];
-    if (video) {
-      try {
-        await deleteStorageFile(video);
-      } catch (err) {
-        console.warn('No se pudo eliminar el video del almacenamiento:', err);
-      }
+    try {
+      await deleteStorageFile(item.url);
+    } catch (err) {
+      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
     }
-    setVideos((prev) => prev.filter((_, i) => i !== index));
+
+    const nextItems = mediaItems.filter((_, i) => i !== index);
+    const { photos: nextPhotos, videos: nextVideos, mediaOrder: nextOrder } = splitMediaItems(nextItems);
+    applyMediaState(nextPhotos, nextVideos, nextOrder);
   };
 
   const syncLocationFields = useCallback((location: LocationChangePayload) => {
@@ -383,7 +403,7 @@ export default function PropertyAI() {
         };
 
     navigate('/admin/propiedades/nueva', {
-      state: { prefilled: editableToProperty(dataToApply, photos, videos) },
+      state: { prefilled: editableToProperty(dataToApply, photos, videos, mediaOrder) },
     });
     clearDraft();
   };
@@ -564,87 +584,70 @@ export default function PropertyAI() {
             {locationFieldInputs(false)}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-white">
-                <ImageIcon size={16} className="text-accent" />
-                Fotos
-              </label>
-              <div className="flex flex-wrap gap-3 items-center">
-                <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4 text-sm">
-                  <Upload size={16} />
-                  {uploadingPhoto ? 'Subiendo...' : 'Subir imágenes'}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,.heic,.heif,.avif,.tif,.tiff"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => void handleImageUpload(e)}
-                    disabled={uploadingPhoto || loading}
-                  />
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-white">
+                  <ImageIcon size={16} className="text-accent" />
+                  Fotos
                 </label>
-                <span className="text-xs text-text-light">Múltiples archivos — subida automática</span>
-              </div>
-              {photos.length > 0 && (
-                <div className="grid grid-cols-3 gap-2">
-                  {photos.map((photo, index) => (
-                    <div key={`${photo}-${index}`} className="relative aspect-[4/3] rounded-lg overflow-hidden group">
-                      <img src={photo} alt="" className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => void removePhoto(index)}
-                        className="absolute top-1 right-1 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Eliminar imagen"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
+                <div className="flex flex-wrap gap-3 items-center">
+                  <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4 text-sm">
+                    <Upload size={16} />
+                    {uploadingPhoto ? 'Subiendo...' : 'Subir imágenes'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,.heic,.heif,.avif,.tif,.tiff"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void handleImageUpload(e)}
+                      disabled={uploadingPhoto || loading}
+                    />
+                  </label>
+                  <span className="text-xs text-text-light">Múltiples archivos — subida automática</span>
                 </div>
-              )}
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-white">
+                  <Video size={16} className="text-accent" />
+                  Videos
+                </label>
+                <div className="flex flex-wrap gap-3 items-center">
+                  <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4 text-sm">
+                    <Upload size={16} />
+                    {uploadingVideo ? 'Subiendo...' : 'Subir videos'}
+                    <input
+                      type="file"
+                      accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-m4v,video/x-matroska,video/ogg,.mp4,.webm,.mov,.avi,.m4v,.mkv"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void handleVideoUpload(e)}
+                      disabled={uploadingVideo || loading}
+                    />
+                  </label>
+                  <span className="text-xs text-text-light">Múltiples archivos — subida automática</span>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-white">
-                <Video size={16} className="text-accent" />
-                Videos
-              </label>
-              <div className="flex flex-wrap gap-3 items-center">
-                <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4 text-sm">
-                  <Upload size={16} />
-                  {uploadingVideo ? 'Subiendo...' : 'Subir videos'}
-                  <input
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-m4v,video/x-matroska,video/ogg,.mp4,.webm,.mov,.avi,.m4v,.mkv"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => void handleVideoUpload(e)}
-                    disabled={uploadingVideo || loading}
-                  />
-                </label>
-                <span className="text-xs text-text-light">Múltiples archivos — subida automática</span>
+            {mediaItems.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm text-text-light">
+                    {mediaItems.length} archivo{mediaItems.length !== 1 ? 's' : ''} — arrastrá para definir el orden de visualización
+                  </p>
+                </div>
+                <SortableMediaList
+                  items={mediaItems}
+                  onReorder={handleMediaReorder}
+                  onRemove={(index) => void removeMedia(index)}
+                  disabled={loading || isUploading}
+                  layout="grid"
+                  showTypeLabel
+                />
               </div>
-              {videos.length > 0 && (
-                <ul className="space-y-2">
-                  {videos.map((video, index) => (
-                    <li
-                      key={`${video}-${index}`}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-border bg-primary/60 px-3 py-2 text-sm"
-                    >
-                      <span className="truncate text-text-light">Video {index + 1}</span>
-                      <button
-                        type="button"
-                        onClick={() => void removeVideo(index)}
-                        className="text-red-400 hover:text-red-300 shrink-0"
-                        title="Eliminar video"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            )}
           </div>
 
           {uploadProgress.length > 0 && (
@@ -715,57 +718,20 @@ export default function PropertyAI() {
             </div>
 
             <div className="p-6 space-y-8">
-              {(photos.length > 0 || videos.length > 0) && (
+              {mediaItems.length > 0 && (
                 <div className="space-y-4">
                   <h3 className="text-sm font-semibold text-white uppercase tracking-wide">Medios cargados</h3>
-                  {photos.length > 0 && (
-                    <div>
-                      <p className="text-xs text-text-light mb-2">
-                        {photos.length} foto{photos.length !== 1 ? 's' : ''}
-                      </p>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                        {photos.map((photo, index) => (
-                          <div key={`preview-${photo}-${index}`} className="relative aspect-[4/3] rounded-lg overflow-hidden group">
-                            <img src={photo} alt="" className="w-full h-full object-cover" />
-                            <button
-                              type="button"
-                              onClick={() => void removePhoto(index)}
-                              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {videos.length > 0 && (
-                    <div>
-                      <p className="text-xs text-text-light mb-2">
-                        {videos.length} video{videos.length !== 1 ? 's' : ''}
-                      </p>
-                      <ul className="space-y-2">
-                        {videos.map((video, index) => (
-                          <li
-                            key={`preview-v-${video}-${index}`}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-border bg-primary/60 px-3 py-2 text-sm text-text-light"
-                          >
-                            <span className="flex items-center gap-2">
-                              <Video size={14} className="text-accent" />
-                              Video {index + 1}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => void removeVideo(index)}
-                              className="text-red-400 hover:text-red-300"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                  <p className="text-xs text-text-light">
+                    Orden de visualización — arrastrá las tarjetas para reorganizar
+                  </p>
+                  <SortableMediaList
+                    items={mediaItems}
+                    onReorder={handleMediaReorder}
+                    onRemove={(index) => void removeMedia(index)}
+                    disabled={loading || isUploading}
+                    layout="grid"
+                    showTypeLabel
+                  />
                 </div>
               )}
 

@@ -18,6 +18,15 @@ import PropertyAIAssistant from './PropertyAIAssistant';
 import PropertyLocationPicker, {
   type LocationChangePayload,
 } from '../map/PropertyLocationPicker';
+import SortableMediaList from './SortableMediaList';
+import {
+  buildMediaItems,
+  mergeReorderedType,
+  splitMediaItems,
+  syncMediaOrder,
+  annotateDisplayOrder,
+  type MediaItem,
+} from '../../lib/mediaOrder';
 import type { Property } from '../../types';
 
 const emptyProperty: Partial<Property> = {
@@ -162,6 +171,56 @@ export default function PropertyForm() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const applyMediaUpdate = async (
+    nextPhotos: string[],
+    nextVideos: string[],
+    nextMediaOrder: string[],
+  ) => {
+    setFormData((prev) => ({
+      ...prev,
+      photos: nextPhotos,
+      videos: nextVideos,
+      media_order: nextMediaOrder,
+    }));
+
+    if (isEditing && id) {
+      try {
+        await updatePropertyMedia(id, {
+          photos: nextPhotos,
+          videos: nextVideos,
+          media_order: nextMediaOrder,
+        });
+      } catch (err) {
+        console.warn('No se pudo actualizar el orden de medios:', err);
+      }
+    }
+  };
+
+  const allMediaItems = annotateDisplayOrder(
+    buildMediaItems(formData.photos || [], formData.videos || [], formData.media_order),
+  );
+
+  const photoItems = allMediaItems.filter((item) => item.type === 'photo');
+  const videoItems = allMediaItems.filter((item) => item.type === 'video');
+
+  const handlePhotoReorder = (items: MediaItem[]) => {
+    const { photos, videos, mediaOrder } = mergeReorderedType(
+      allMediaItems,
+      'photo',
+      items.map((item) => item.url),
+    );
+    void applyMediaUpdate(photos, videos, mediaOrder);
+  };
+
+  const handleVideoReorder = (items: MediaItem[]) => {
+    const { photos, videos, mediaOrder } = mergeReorderedType(
+      allMediaItems,
+      'video',
+      items.map((item) => item.url),
+    );
+    void applyMediaUpdate(photos, videos, mediaOrder);
+  };
+
   const handleNumberChange = (field: keyof Property, value: string) => {
     const num = value === '' ? null : parseFloat(value);
     handleChange(field, num);
@@ -180,10 +239,8 @@ export default function PropertyForm() {
         );
       });
       const nextPhotos = [...(formData.photos || []), ...urls];
-      setFormData((prev) => ({ ...prev, photos: nextPhotos }));
-      if (isEditing && id) {
-        await updatePropertyMedia(id, { photos: nextPhotos });
-      }
+      const nextOrder = syncMediaOrder(nextPhotos, formData.videos || [], formData.media_order);
+      await applyMediaUpdate(nextPhotos, formData.videos || [], nextOrder);
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : 'Error al subir las imágenes');
@@ -207,10 +264,8 @@ export default function PropertyForm() {
         );
       });
       const nextVideos = [...(formData.videos || []), ...newUrls];
-      setFormData((prev) => ({ ...prev, videos: nextVideos }));
-      if (isEditing && id) {
-        await updatePropertyMedia(id, { videos: nextVideos });
-      }
+      const nextOrder = syncMediaOrder(formData.photos || [], nextVideos, formData.media_order);
+      await applyMediaUpdate(formData.photos || [], nextVideos, nextOrder);
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : 'Error al subir el video');
@@ -232,49 +287,33 @@ export default function PropertyForm() {
   };
 
   const removePhoto = async (index: number) => {
-    const photo = formData.photos?.[index];
-    if (photo) {
-      try {
-        await deleteStorageFile(photo);
-      } catch (err) {
-        console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
-      }
+    const item = photoItems[index];
+    if (!item) return;
+
+    try {
+      await deleteStorageFile(item.url);
+    } catch (err) {
+      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
     }
-    const nextPhotos = (formData.photos || []).filter((_, i) => i !== index);
-    setFormData(prev => ({
-      ...prev,
-      photos: nextPhotos,
-    }));
-    if (isEditing && id) {
-      try {
-        await updatePropertyMedia(id, { photos: nextPhotos });
-      } catch (err) {
-        console.warn('No se pudo actualizar la propiedad en la base de datos:', err);
-      }
-    }
+
+    const nextItems = allMediaItems.filter((media) => media.url !== item.url);
+    const { photos, videos, mediaOrder } = splitMediaItems(nextItems);
+    await applyMediaUpdate(photos, videos, mediaOrder);
   };
 
   const removeVideo = async (index: number) => {
-    const video = formData.videos?.[index];
-    if (video) {
-      try {
-        await deleteStorageFile(video);
-      } catch (err) {
-        console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
-      }
+    const item = videoItems[index];
+    if (!item) return;
+
+    try {
+      await deleteStorageFile(item.url);
+    } catch (err) {
+      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
     }
-    const nextVideos = (formData.videos || []).filter((_, i) => i !== index);
-    setFormData(prev => ({
-      ...prev,
-      videos: nextVideos,
-    }));
-    if (isEditing && id) {
-      try {
-        await updatePropertyMedia(id, { videos: nextVideos });
-      } catch (err) {
-        console.warn('No se pudo actualizar la propiedad en la base de datos:', err);
-      }
-    }
+
+    const nextItems = allMediaItems.filter((media) => media.url !== item.url);
+    const { photos, videos, mediaOrder } = splitMediaItems(nextItems);
+    await applyMediaUpdate(photos, videos, mediaOrder);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -286,6 +325,11 @@ export default function PropertyForm() {
         ...formData,
         photos: formData.photos || [],
         videos: formData.videos || [],
+        media_order: syncMediaOrder(
+          formData.photos || [],
+          formData.videos || [],
+          formData.media_order,
+        ),
         video_url: null,
         amenities: formData.amenities || [],
         features: formData.features || [],
@@ -648,25 +692,17 @@ export default function PropertyForm() {
 
               {(formData.photos || []).length > 0 && (
                 <p className="text-sm text-text-light">
-                  {(formData.photos || []).length} foto{(formData.photos || []).length !== 1 ? 's' : ''} cargada{(formData.photos || []).length !== 1 ? 's' : ''}
+                  {(formData.photos || []).length} foto{(formData.photos || []).length !== 1 ? 's' : ''} — arrastrá para reordenar
                 </p>
               )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {(formData.photos || []).map((photo, index) => (
-                  <div key={`${photo}-${index}`} className="relative aspect-[4/3] rounded-lg overflow-hidden group">
-                    <img src={photo} alt="" className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => removePhoto(index)}
-                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Eliminar imagen"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <SortableMediaList
+                items={photoItems}
+                onReorder={handlePhotoReorder}
+                onRemove={(index) => void removePhoto(index)}
+                disabled={uploadingPhoto || saving}
+                layout="grid"
+              />
 
               {(formData.photos || []).length === 0 && (
                 <div className="text-center py-12 border-2 border-dashed border-border rounded-xl">
@@ -810,31 +846,18 @@ export default function PropertyForm() {
 
               {(formData.videos || []).length > 0 && (
                 <p className="text-sm text-text-light">
-                  {(formData.videos || []).length} video{(formData.videos || []).length !== 1 ? 's' : ''} cargado{(formData.videos || []).length !== 1 ? 's' : ''}
+                  {(formData.videos || []).length} video{(formData.videos || []).length !== 1 ? 's' : ''} — arrastrá para reordenar
                 </p>
               )}
 
               {(formData.videos || []).length > 0 ? (
-                <div className="space-y-4">
-                  {(formData.videos || []).map((videoUrl, index) => (
-                    <div key={`${videoUrl}-${index}`} className="relative rounded-lg overflow-hidden bg-metallic/40 border border-border">
-                      <video
-                        src={videoUrl}
-                        controls
-                        className="w-full aspect-video object-contain bg-black"
-                        preload="metadata"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeVideo(index)}
-                        className="absolute top-3 right-3 w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
-                        title="Eliminar video"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                <SortableMediaList
+                  items={videoItems}
+                  onReorder={handleVideoReorder}
+                  onRemove={(index) => void removeVideo(index)}
+                  disabled={uploadingVideo || saving}
+                  layout="list"
+                />
               ) : (
                 <div className="text-center py-12 border-2 border-dashed border-border rounded-xl">
                   <Video size={48} className="text-text-light mx-auto mb-4" />

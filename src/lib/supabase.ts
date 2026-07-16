@@ -42,6 +42,7 @@ function normalizeProperty(row: Property): Property {
     latitude: parseCoordinate(row.latitude),
     longitude: parseCoordinate(row.longitude),
     videos,
+    media_order: row.media_order ?? [],
   };
 }
 
@@ -552,12 +553,13 @@ export async function deleteUserProfile(userId: string) {
 
 export async function updatePropertyMedia(
   propertyId: string,
-  media: { photos?: string[]; videos?: string[] },
+  media: { photos?: string[]; videos?: string[]; media_order?: string[] },
 ): Promise<void> {
   await saveProperty(
     {
       ...(media.photos !== undefined ? { photos: media.photos } : {}),
       ...(media.videos !== undefined ? { videos: media.videos } : {}),
+      ...(media.media_order !== undefined ? { media_order: media.media_order } : {}),
     },
     propertyId,
   );

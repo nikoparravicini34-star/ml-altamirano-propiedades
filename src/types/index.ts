@@ -23,6 +23,8 @@ export interface Property {
   photos: string[];
   /** Uploaded video files (Supabase Storage URLs). */
   videos: string[];
+  /** Global display order (URLs). Index 0 = position 1. */
+  media_order?: string[];
   /** @deprecated Legacy single video URL — use `videos` for new uploads. */
   video_url: string | null;
   latitude: number | null;
