@@ -4,6 +4,7 @@ import { m } from 'framer-motion';
 import { Bed, Bath, Car, Maximize, MapPin, Heart } from 'lucide-react';
 import type { Property } from '../../types';
 import OptimizedImage from './OptimizedImage';
+import { getCoverMedia, getCoverPhotoUrl } from '../../lib/mediaOrder';
 import { ease, viewportOnce } from '../../lib/motion';
 import { useFavorites } from '../../context/FavoritesContext';
 
@@ -16,6 +17,9 @@ function PropertyCard({ property, index = 0 }: PropertyCardProps) {
   const { isFavorited, toggleFavorite } = useFavorites();
   const [favLoading, setFavLoading] = useState(false);
   const favorited = isFavorited(property.id);
+
+  const coverMedia = useMemo(() => getCoverMedia(property), [property]);
+  const coverPhotoUrl = useMemo(() => getCoverPhotoUrl(property), [property]);
 
   const priceLabel = useMemo(() => {
     const formatted = new Intl.NumberFormat('es-AR').format(property.price);
@@ -56,13 +60,23 @@ function PropertyCard({ property, index = 0 }: PropertyCardProps) {
         <div className="property-card__inner bg-graphite rounded-2xl overflow-hidden border border-white/5 h-full flex flex-col">
           <div className="property-card__media relative aspect-[4/3] shrink-0 overflow-hidden">
             <div className="property-card__media-zoom">
-              <OptimizedImage
-                src={property.photos[0]}
-                alt={property.title}
-                width={640}
-                quality={70}
-                className="property-card__img"
-              />
+              {coverMedia?.type === 'video' ? (
+                <video
+                  src={coverMedia.url}
+                  className="property-card__img w-full h-full object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <OptimizedImage
+                  src={coverPhotoUrl}
+                  alt={property.title}
+                  width={640}
+                  quality={70}
+                  className="property-card__img"
+                />
+              )}
             </div>
 
             <div className="absolute top-4 left-4 flex gap-2 z-[1]">

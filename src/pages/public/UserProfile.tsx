@@ -18,6 +18,7 @@ import {
 } from '../../lib/supabase';
 import { validateName, validatePhone } from '../../lib/validation';
 import type { Property, UserInquiry } from '../../types';
+import { getCoverPhotoUrl } from '../../lib/mediaOrder';
 
 type Section = 'overview' | 'favorites' | 'viewed' | 'inquiries' | 'settings';
 interface FavoriteEntry { property: Property; favId: string }
@@ -598,7 +599,7 @@ function PropertyRow({
   detailed?: boolean;
   onRemove?: () => void;
 }) {
-  const img = property.photos[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&q=70';
+  const img = getCoverPhotoUrl(property);
   return (
     <div className="flex items-center gap-4 px-6 py-4 hover:bg-white/5 transition-colors group">
       <Link to={`/propiedad/${property.id}`} className="flex items-center gap-4 flex-1 min-w-0">
@@ -641,7 +642,7 @@ function PropertyRow({
 }
 
 function PropertyThumb({ property, large }: { property: Property; large?: boolean }) {
-  const img = property.photos[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&q=70';
+  const img = getCoverPhotoUrl(property);
   return (
     <Link to={`/propiedad/${property.id}`} className="group block rounded-xl overflow-hidden border border-border hover:border-[#C9A24D]/30 transition-colors shadow-sm">
       <div className="aspect-[4/3] overflow-hidden">

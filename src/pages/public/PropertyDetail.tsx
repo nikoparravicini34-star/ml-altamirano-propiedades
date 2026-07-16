@@ -1,6 +1,6 @@
 ﻿import { useParams, Link } from 'react-router-dom';
 import { m } from 'framer-motion';
-import { Bed, Bath, Car, Maximize, MapPin, ChevronLeft, ChevronRight, Phone, MessageCircle, Heart, ExternalLink } from 'lucide-react';
+import { Bed, Bath, Car, Maximize, MapPin, ChevronLeft, ChevronRight, Phone, MessageCircle, Heart, ExternalLink, Video } from 'lucide-react';
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useProperty } from '../../hooks/useProperties';
 import { useSiteSettings } from '../../context/SiteSettingsContext';
@@ -10,6 +10,7 @@ import { useFavorites } from '../../context/FavoritesContext';
 import { recordViewedProperty } from '../../lib/supabase';
 import { optimizeImageUrl } from '../../lib/images';
 import { buildGoogleMapsUrl, formatPropertyLocation, getPropertyCoordinates } from '../../lib/location';
+import { getPropertyMediaItems } from '../../lib/mediaOrder';
 
 const PropertyAIChat = lazy(() => import('../../components/property/PropertyAIChat'));
 const PropertyLocationMap = lazy(() => import('../../components/map/PropertyLocationMap'));
@@ -20,9 +21,26 @@ export default function PropertyDetail() {
   const { property, loading, error } = useProperty(id);
   const { user, profileCompleted } = useAuth();
   const { isFavorited, toggleFavorite } = useFavorites();
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   const [favLoading, setFavLoading] = useState(false);
   const favorited = id ? isFavorited(id) : false;
+
+  const mediaItems = useMemo(
+    () => (property ? getPropertyMediaItems(property) : []),
+    [property],
+  );
+
+  const currentMedia = mediaItems[currentMediaIndex];
+
+  useEffect(() => {
+    setCurrentMediaIndex(0);
+  }, [property?.id]);
+
+  useEffect(() => {
+    if (currentMediaIndex >= mediaItems.length && mediaItems.length > 0) {
+      setCurrentMediaIndex(0);
+    }
+  }, [currentMediaIndex, mediaItems.length]);
 
   useEffect(() => {
     if (!user || !id) return;
@@ -32,8 +50,11 @@ export default function PropertyDetail() {
   }, [user, id, profileCompleted]);
 
   const mainPhoto = useMemo(
-    () => optimizeImageUrl(property?.photos?.[currentImageIndex], { width: 1400, quality: 75 }),
-    [property?.photos, currentImageIndex]
+    () =>
+      currentMedia?.type === 'photo'
+        ? optimizeImageUrl(currentMedia.url, { width: 1400, quality: 75 })
+        : undefined,
+    [currentMedia],
   );
 
   const handleFavorite = async () => {
@@ -58,12 +79,12 @@ export default function PropertyDetail() {
     return `${currency} ${formatted}`;
   };
 
-  const nextImage = () => {
-    setCurrentImageIndex((prev) => (prev + 1) % property.photos.length);
+  const nextMedia = () => {
+    setCurrentMediaIndex((prev) => (prev + 1) % mediaItems.length);
   };
 
-  const prevImage = () => {
-    setCurrentImageIndex((prev) => (prev - 1 + property.photos.length) % property.photos.length);
+  const prevMedia = () => {
+    setCurrentMediaIndex((prev) => (prev - 1 + mediaItems.length) % mediaItems.length);
   };
 
   const whatsappMessage = encodeURIComponent(`Hola, me interesa la propiedad: ${property.title}`);
@@ -86,34 +107,47 @@ export default function PropertyDetail() {
           <span className="text-accent truncate max-w-[200px]">{property.title}</span>
         </m.div>
 
-        {/* Image Gallery */}
+        {/* Media Gallery */}
         <m.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           className="relative aspect-[16/9] lg:aspect-[21/9] rounded-2xl overflow-hidden mb-8 border border-border shadow-lg "
         >
-          <img
-            key={currentImageIndex}
-            src={mainPhoto}
-            alt={property.title}
-            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
-            fetchPriority="high"
-            decoding="async"
-          />
+          {currentMedia?.type === 'video' ? (
+            <video
+              key={currentMedia.url}
+              src={currentMedia.url}
+              controls
+              className="absolute inset-0 w-full h-full object-cover bg-black"
+              preload="metadata"
+              playsInline
+            >
+              Tu navegador no soporta la reproducción de video.
+            </video>
+          ) : (
+            <img
+              key={currentMediaIndex}
+              src={mainPhoto}
+              alt={property.title}
+              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
+              fetchPriority="high"
+              decoding="async"
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-primary/50 via-transparent to-transparent pointer-events-none" />
-          {property.photos.length > 1 && (
+          {mediaItems.length > 1 && (
             <>
               <button
                 type="button"
-                onClick={prevImage}
+                onClick={prevMedia}
                 className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-primary/70 backdrop-blur-md border border-border flex items-center justify-center hover:border-accent/50 hover:scale-105 active:scale-95 transition-all"
               >
                 <ChevronLeft size={24} />
               </button>
               <button
                 type="button"
-                onClick={nextImage}
+                onClick={nextMedia}
                 className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-primary/70 backdrop-blur-md border border-border flex items-center justify-center hover:border-accent/50 hover:scale-105 active:scale-95 transition-all"
               >
                 <ChevronRight size={24} />
@@ -135,30 +169,41 @@ export default function PropertyDetail() {
               </span>
             )}
           </div>
-          <div className="absolute bottom-4 right-4 bg-primary/70 backdrop-blur-md border border-border px-4 py-2 rounded-full text-sm font-medium">
-            {currentImageIndex + 1} / {property.photos.length}
-          </div>
+          {mediaItems.length > 0 && (
+            <div className="absolute bottom-4 right-4 bg-primary/70 backdrop-blur-md border border-border px-4 py-2 rounded-full text-sm font-medium">
+              {currentMediaIndex + 1} / {mediaItems.length}
+            </div>
+          )}
         </m.div>
 
         {/* Thumbnails */}
-        {property.photos.length > 1 && (
+        {mediaItems.length > 1 && (
           <div className="flex gap-3 mb-8 overflow-x-auto pb-2">
-            {property.photos.map((photo, index) => (
+            {mediaItems.map((item, index) => (
               <button
-                key={index}
+                key={item.url}
                 type="button"
-                onClick={() => setCurrentImageIndex(index)}
-                className={`w-24 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all ${
-                  index === currentImageIndex ? 'border-accent' : 'border-transparent'
+                onClick={() => setCurrentMediaIndex(index)}
+                className={`w-24 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-all relative ${
+                  index === currentMediaIndex ? 'border-accent' : 'border-transparent'
                 }`}
               >
-                <img
-                  src={optimizeImageUrl(photo, { width: 160, quality: 60 })}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                  decoding="async"
-                />
+                {item.type === 'photo' ? (
+                  <img
+                    src={optimizeImageUrl(item.url, { width: 160, quality: 60 })}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-black flex items-center justify-center">
+                    <Video size={20} className="text-accent" />
+                  </div>
+                )}
+                <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-primary/80 text-[10px] font-bold text-accent flex items-center justify-center">
+                  {index + 1}
+                </span>
               </button>
             ))}
           </div>
@@ -249,33 +294,6 @@ export default function PropertyDetail() {
                 {property.full_description || property.short_description || 'Sin descripción disponible.'}
               </p>
             </m.div>
-
-            {/* Videos */}
-            {property.videos.length > 0 && (
-              <m.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.35 }}
-                className="card-premium p-6"
-              >
-                <h2 className="font-serif text-xl font-bold text-white mb-4">Video{property.videos.length > 1 ? 's' : ''}</h2>
-                <div className="space-y-4">
-                  {property.videos.map((videoUrl, index) => (
-                    <div key={`${videoUrl}-${index}`} className="aspect-video rounded-lg overflow-hidden bg-black border border-border">
-                      <video
-                        src={videoUrl}
-                        controls
-                        className="w-full h-full object-contain"
-                        preload="metadata"
-                        playsInline
-                      >
-                        Tu navegador no soporta la reproducción de video.
-                      </video>
-                    </div>
-                  ))}
-                </div>
-              </m.div>
-            )}
 
             {/* AI Assistant — property-specific context */}
             <Suspense fallback={null}>

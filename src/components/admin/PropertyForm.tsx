@@ -21,7 +21,6 @@ import PropertyLocationPicker, {
 import SortableMediaList from './SortableMediaList';
 import {
   buildMediaItems,
-  mergeReorderedType,
   splitMediaItems,
   syncMediaOrder,
   annotateDisplayOrder,
@@ -52,6 +51,7 @@ const emptyProperty: Partial<Property> = {
   full_description: '',
   photos: [],
   videos: [],
+  media_order: [],
   video_url: null,
   latitude: null,
   longitude: null,
@@ -62,7 +62,7 @@ const emptyProperty: Partial<Property> = {
 
 type PropertyFormDraft = {
   formData: Partial<Property>;
-  activeTab: 'general' | 'characteristics' | 'photos' | 'location' | 'video';
+  activeTab: 'general' | 'characteristics' | 'media' | 'location';
   newAmenity: string;
   newFeature: string;
   savedLocation: LocationChangePayload | null;
@@ -91,7 +91,7 @@ export default function PropertyForm() {
 
   const [formData, setFormData] = useState<Partial<Property>>(emptyProperty);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'general' | 'characteristics' | 'photos' | 'location' | 'video'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'characteristics' | 'media' | 'location'>('general');
   const [newAmenity, setNewAmenity] = useState('');
   const [newFeature, setNewFeature] = useState('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -202,23 +202,26 @@ export default function PropertyForm() {
 
   const photoItems = allMediaItems.filter((item) => item.type === 'photo');
   const videoItems = allMediaItems.filter((item) => item.type === 'video');
+  const hasMedia = allMediaItems.length > 0;
 
-  const handlePhotoReorder = (items: MediaItem[]) => {
-    const { photos, videos, mediaOrder } = mergeReorderedType(
-      allMediaItems,
-      'photo',
-      items.map((item) => item.url),
-    );
+  const handleMediaReorder = (items: MediaItem[]) => {
+    const { photos, videos, mediaOrder } = splitMediaItems(items);
     void applyMediaUpdate(photos, videos, mediaOrder);
   };
 
-  const handleVideoReorder = (items: MediaItem[]) => {
-    const { photos, videos, mediaOrder } = mergeReorderedType(
-      allMediaItems,
-      'video',
-      items.map((item) => item.url),
-    );
-    void applyMediaUpdate(photos, videos, mediaOrder);
+  const removeMedia = async (index: number) => {
+    const item = allMediaItems[index];
+    if (!item) return;
+
+    try {
+      await deleteStorageFile(item.url);
+    } catch (err) {
+      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
+    }
+
+    const nextItems = allMediaItems.filter((media) => media.url !== item.url);
+    const { photos, videos, mediaOrder } = splitMediaItems(nextItems);
+    await applyMediaUpdate(photos, videos, mediaOrder);
   };
 
   const handleNumberChange = (field: keyof Property, value: string) => {
@@ -286,36 +289,6 @@ export default function PropertyForm() {
     setFormData(prev => ({ ...prev, [field]: (prev[field] || []).filter((_, i) => i !== index) }));
   };
 
-  const removePhoto = async (index: number) => {
-    const item = photoItems[index];
-    if (!item) return;
-
-    try {
-      await deleteStorageFile(item.url);
-    } catch (err) {
-      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
-    }
-
-    const nextItems = allMediaItems.filter((media) => media.url !== item.url);
-    const { photos, videos, mediaOrder } = splitMediaItems(nextItems);
-    await applyMediaUpdate(photos, videos, mediaOrder);
-  };
-
-  const removeVideo = async (index: number) => {
-    const item = videoItems[index];
-    if (!item) return;
-
-    try {
-      await deleteStorageFile(item.url);
-    } catch (err) {
-      console.warn('No se pudo eliminar el archivo del almacenamiento:', err);
-    }
-
-    const nextItems = allMediaItems.filter((media) => media.url !== item.url);
-    const { photos, videos, mediaOrder } = splitMediaItems(nextItems);
-    await applyMediaUpdate(photos, videos, mediaOrder);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -353,9 +326,8 @@ export default function PropertyForm() {
   const tabs = [
     { key: 'general', label: 'Información general' },
     { key: 'characteristics', label: 'Características' },
-    { key: 'photos', label: 'Fotos' },
+    { key: 'media', label: 'Fotos y videos' },
     { key: 'location', label: 'Ubicación' },
-    { key: 'video', label: 'Videos' },
   ] as const;
 
   return (
@@ -650,28 +622,60 @@ export default function PropertyForm() {
             </div>
           )}
 
-          {/* Photos Tab */}
-          {activeTab === 'photos' && (
-            <div className="space-y-6">
-              <div className="flex flex-wrap gap-3 items-center">
-                <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4">
-                  <Upload size={18} />
-                  {uploadingPhoto ? 'Subiendo...' : 'Subir imágenes'}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,.heic,.heif,.avif,.tif,.tiff"
-                    multiple
-                    className="hidden"
-                    onChange={handleImageUpload}
-                    disabled={uploadingPhoto}
-                  />
-                </label>
-                <span className="text-sm text-text-light">
-                  JPG, PNG, WebP, GIF, HEIC, AVIF o TIFF — sin límite de cantidad ni tamaño
-                </span>
+          {/* Media Tab */}
+          {activeTab === 'media' && (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-white">Imágenes</label>
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4">
+                      <Upload size={18} />
+                      {uploadingPhoto ? 'Subiendo...' : 'Subir imágenes'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/tiff,.heic,.heif,.avif,.tif,.tiff"
+                        multiple
+                        className="hidden"
+                        onChange={handleImageUpload}
+                        disabled={uploadingPhoto}
+                      />
+                    </label>
+                    <span className="text-sm text-text-light">
+                      JPG, PNG, WebP, GIF, HEIC, AVIF o TIFF
+                    </span>
+                  </div>
+                  {photoItems.length > 0 && (
+                    <p className="text-xs text-text-light">{photoItems.length} imagen{photoItems.length !== 1 ? 'es' : ''}</p>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-white">Videos</label>
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4">
+                      <Video size={18} />
+                      {uploadingVideo ? 'Subiendo...' : 'Agregar video'}
+                      <input
+                        type="file"
+                        accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-m4v,video/x-matroska,.mp4,.webm,.mov,.avi,.m4v,.mkv"
+                        multiple
+                        className="hidden"
+                        onChange={handleVideoUpload}
+                        disabled={uploadingVideo}
+                      />
+                    </label>
+                    <span className="text-sm text-text-light">
+                      MP4, WebM, MOV, AVI, M4V o MKV
+                    </span>
+                  </div>
+                  {videoItems.length > 0 && (
+                    <p className="text-xs text-text-light">{videoItems.length} video{videoItems.length !== 1 ? 's' : ''}</p>
+                  )}
+                </div>
               </div>
 
-              {uploadProgress.length > 0 && uploadProgress[0].type === 'photo' && (
+              {uploadProgress.length > 0 && (
                 <div className="space-y-2">
                   {uploadProgress.map((item) => (
                     <div key={item.name} className="bg-primary rounded-lg p-3 border border-border">
@@ -690,25 +694,25 @@ export default function PropertyForm() {
                 </div>
               )}
 
-              {(formData.photos || []).length > 0 && (
-                <p className="text-sm text-text-light">
-                  {(formData.photos || []).length} foto{(formData.photos || []).length !== 1 ? 's' : ''} — arrastrá para reordenar
-                </p>
-              )}
-
-              <SortableMediaList
-                items={photoItems}
-                onReorder={handlePhotoReorder}
-                onRemove={(index) => void removePhoto(index)}
-                disabled={uploadingPhoto || saving}
-                layout="grid"
-              />
-
-              {(formData.photos || []).length === 0 && (
+              {hasMedia ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-text-light">
+                    {allMediaItems.length} archivo{allMediaItems.length !== 1 ? 's' : ''} — arrastrá para definir el orden. El #1 es la portada principal.
+                  </p>
+                  <SortableMediaList
+                    items={allMediaItems}
+                    onReorder={handleMediaReorder}
+                    onRemove={(index) => void removeMedia(index)}
+                    disabled={uploadingPhoto || uploadingVideo || saving}
+                    layout="grid"
+                    showTypeLabel
+                  />
+                </div>
+              ) : (
                 <div className="text-center py-12 border-2 border-dashed border-border rounded-xl">
                   <Upload size={48} className="text-text-light mx-auto mb-4" />
-                  <p className="text-text-light">No hay fotos cargadas</p>
-                  <p className="text-sm text-text-light/70 mt-1">Subí imágenes desde tu computadora</p>
+                  <p className="text-text-light">No hay fotos ni videos cargados</p>
+                  <p className="text-sm text-text-light/70 mt-1">Subí archivos desde tu computadora</p>
                 </div>
               )}
             </div>
@@ -804,69 +808,6 @@ export default function PropertyForm() {
             </div>
           )}
 
-          {/* Video Tab */}
-          {activeTab === 'video' && (
-            <div className="space-y-6">
-              <div className="flex flex-wrap gap-3 items-center">
-                <label className="btn-primary flex items-center gap-2 cursor-pointer py-2 px-4">
-                  <Video size={18} />
-                  {uploadingVideo ? 'Subiendo...' : 'Agregar video'}
-                  <input
-                    type="file"
-                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-m4v,video/x-matroska,.mp4,.webm,.mov,.avi,.m4v,.mkv"
-                    multiple
-                    className="hidden"
-                    onChange={handleVideoUpload}
-                    disabled={uploadingVideo}
-                  />
-                </label>
-                <span className="text-sm text-text-light">
-                  MP4, WebM, MOV, AVI, M4V o MKV — sin límite de cantidad ni tamaño
-                </span>
-              </div>
-
-              {uploadProgress.length > 0 && uploadProgress[0].type === 'video' && (
-                <div className="space-y-2">
-                  {uploadProgress.map((item) => (
-                    <div key={item.name} className="bg-primary rounded-lg p-3 border border-border">
-                      <div className="flex justify-between text-xs text-text-light mb-1.5">
-                        <span className="truncate mr-2">{item.name}</span>
-                        <span>{item.percent}%</span>
-                      </div>
-                      <div className="h-1.5 bg-metallic/40 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-accent transition-all duration-300 rounded-full"
-                          style={{ width: `${item.percent}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {(formData.videos || []).length > 0 && (
-                <p className="text-sm text-text-light">
-                  {(formData.videos || []).length} video{(formData.videos || []).length !== 1 ? 's' : ''} — arrastrá para reordenar
-                </p>
-              )}
-
-              {(formData.videos || []).length > 0 ? (
-                <SortableMediaList
-                  items={videoItems}
-                  onReorder={handleVideoReorder}
-                  onRemove={(index) => void removeVideo(index)}
-                  disabled={uploadingVideo || saving}
-                  layout="list"
-                />
-              ) : (
-                <div className="text-center py-12 border-2 border-dashed border-border rounded-xl">
-                  <Video size={48} className="text-text-light mx-auto mb-4" />
-                  <p className="text-text-light">No hay videos cargados</p>
-                  <p className="text-sm text-text-light/70 mt-1">Subí videos directamente desde tu computadora</p>
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Actions */}

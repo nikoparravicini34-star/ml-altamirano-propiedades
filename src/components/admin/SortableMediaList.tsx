@@ -80,8 +80,15 @@ function SortableMediaCard({
           />
         )}
 
-        <div className="absolute top-2 left-2 w-7 h-7 rounded-full bg-accent text-primary text-xs font-bold flex items-center justify-center shadow-md">
-          {item.displayOrder ?? order}
+        <div className="absolute top-2 left-2 flex items-center gap-1.5">
+          <div className="w-7 h-7 rounded-full bg-accent text-primary text-xs font-bold flex items-center justify-center shadow-md">
+            {item.displayOrder ?? order}
+          </div>
+          {(item.displayOrder ?? order) === 1 && (
+            <span className="px-2 py-0.5 rounded-full bg-primary/90 text-[10px] font-semibold text-accent border border-accent/40 shadow-md">
+              Portada
+            </span>
+          )}
         </div>
 
         <button
@@ -134,8 +141,15 @@ function SortableMediaCard({
         <GripVertical size={14} />
       </button>
 
-      <div className="w-7 h-7 rounded-full bg-accent text-primary text-xs font-bold flex items-center justify-center shrink-0">
-        {item.displayOrder ?? order}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <div className="w-7 h-7 rounded-full bg-accent text-primary text-xs font-bold flex items-center justify-center">
+          {item.displayOrder ?? order}
+        </div>
+        {(item.displayOrder ?? order) === 1 && (
+          <span className="px-2 py-0.5 rounded-full bg-accent/15 text-[10px] font-semibold text-accent border border-accent/30">
+            Portada
+          </span>
+        )}
       </div>
 
       {item.type === 'photo' ? (

@@ -1,9 +1,49 @@
+import type { Property } from '../types';
+
 export type MediaItem = {
   url: string;
   type: 'photo' | 'video';
   /** Global display position (1-based). Falls back to list index when omitted. */
   displayOrder?: number;
 };
+
+type MediaProperty = Pick<Property, 'photos' | 'videos' | 'media_order'>;
+
+const FALLBACK_COVER =
+  'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=400&q=70';
+
+/** Ordered media list for a property (photos + videos). */
+export function getPropertyMediaItems(property: MediaProperty): MediaItem[] {
+  return buildMediaItems(property.photos ?? [], property.videos ?? [], property.media_order);
+}
+
+/** First item in display order — the main cover (photo or video). */
+export function getCoverMedia(property: MediaProperty): MediaItem | undefined {
+  return getPropertyMediaItems(property)[0];
+}
+
+/** Cover image URL for cards/thumbnails; falls back to first photo or placeholder. */
+export function getCoverPhotoUrl(property: MediaProperty): string {
+  const items = getPropertyMediaItems(property);
+  const cover = items[0];
+  if (cover?.type === 'photo') return cover.url;
+  const firstPhoto = items.find((item) => item.type === 'photo');
+  return firstPhoto?.url ?? property.photos?.[0] ?? FALLBACK_COVER;
+}
+
+/** Photos in display order (for galleries that only show images). */
+export function getOrderedPhotos(property: MediaProperty): string[] {
+  return getPropertyMediaItems(property)
+    .filter((item) => item.type === 'photo')
+    .map((item) => item.url);
+}
+
+/** Videos in display order. */
+export function getOrderedVideos(property: MediaProperty): string[] {
+  return getPropertyMediaItems(property)
+    .filter((item) => item.type === 'video')
+    .map((item) => item.url);
+}
 
 export function annotateDisplayOrder(items: MediaItem[]): MediaItem[] {
   return items.map((item, index) => ({

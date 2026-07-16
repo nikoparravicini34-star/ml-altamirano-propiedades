@@ -635,7 +635,7 @@ export default function PropertyAI() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-sm text-text-light">
-                    {mediaItems.length} archivo{mediaItems.length !== 1 ? 's' : ''} — arrastrá para definir el orden de visualización
+                    {mediaItems.length} archivo{mediaItems.length !== 1 ? 's' : ''} — arrastrá para definir el orden. El #1 es la portada principal.
                   </p>
                 </div>
                 <SortableMediaList

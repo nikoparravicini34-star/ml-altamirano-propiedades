@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, Star, Eye, EyeOff } from 'lucide-react';
 import { useAdminProperties } from '../../hooks/useAdminProperties';
 import { supabase, deleteProperty } from '../../lib/supabase';
 import LoadingSpinner from '../ui/LoadingSpinner';
+import { getCoverPhotoUrl } from '../../lib/mediaOrder';
 import type { Property } from '../../types';
 
 interface PropertiesListProps {
@@ -131,7 +132,7 @@ export default function PropertiesList({ canDelete = false }: PropertiesListProp
                 {filtered.map(property => (
                   <tr key={property.id} className="border-b border-border/30 hover:bg-warm/20 transition-colors">
                     <td className="px-5 py-4">
-                      <img src={property.photos[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=200&q=80'} alt="" className="w-14 h-10 rounded-lg object-cover" />
+                      <img src={getCoverPhotoUrl(property)} alt="" className="w-14 h-10 rounded-lg object-cover" />
                     </td>
                     <td className="px-5 py-4">
                       <span className="font-medium text-white">{property.title}</span>
