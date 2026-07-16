@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import type { ParsedPropertyFields, Property } from '../../types';
 import { parsePropertyDescription } from '../../lib/propertyAIParser';
+import { useFormDraft } from '../../hooks/useFormDraft';
+import { buildFormDraftKey } from '../../lib/formDraftStorage';
 import PropertyLocationPicker, {
   type LocationChangePayload,
 } from '../../components/map/PropertyLocationPicker';
@@ -141,6 +143,27 @@ function editableToProperty(
   };
 }
 
+type PropertyAIDraft = {
+  description: string;
+  savedLocation: LocationChangePayload | null;
+  locationFields: {
+    address: string;
+    city: string;
+    neighborhood: string;
+    province: string;
+    country: string;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  photos: string[];
+  videos: string[];
+  editable: AIEditablePreview | null;
+};
+
+function isPropertyAIEmpty(draft: PropertyAIDraft): boolean {
+  return !draft.description.trim() && draft.editable == null;
+}
+
 export default function PropertyAI() {
   const navigate = useNavigate();
   const [description, setDescription] = useState('');
@@ -164,6 +187,25 @@ export default function PropertyAI() {
   const [uploadProgress, setUploadProgress] = useState<
     { name: string; percent: number; type: 'photo' | 'video' }[]
   >([]);
+
+  const draftKey = buildFormDraftKey(['property-ai']);
+
+  const { clearDraft } = useFormDraft<PropertyAIDraft>(
+    draftKey,
+    { description, savedLocation, locationFields, photos, videos, editable },
+    {
+      enabled: !loading,
+      isEmpty: isPropertyAIEmpty,
+      onRestore: (draft) => {
+        setDescription(draft.description);
+        setSavedLocation(draft.savedLocation);
+        setLocationFields(draft.locationFields);
+        setPhotos(draft.photos);
+        setVideos(draft.videos);
+        setEditable(draft.editable);
+      },
+    },
+  );
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -343,6 +385,7 @@ export default function PropertyAI() {
     navigate('/admin/propiedades/nueva', {
       state: { prefilled: editableToProperty(dataToApply, photos, videos) },
     });
+    clearDraft();
   };
 
   const isUploading = uploadingPhoto || uploadingVideo;

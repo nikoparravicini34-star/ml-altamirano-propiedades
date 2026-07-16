@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authInitialized, setAuthInitialized] = useState(false);
 
   const profileLoadIdRef = useRef(0);
+  const loadedProfileUserIdRef = useRef<string | null>(null);
 
   const applySession = useCallback((s: Session | null) => {
     setSession(s);
@@ -168,6 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (event === 'SIGNED_OUT') {
         pendingOAuth = false;
+        loadedProfileUserIdRef.current = null;
         finishLoadingWithoutUser();
       }
     });
@@ -215,15 +217,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!authInitialized) return;
 
     if (!user?.id || !session) {
-      if (!user) setIsLoading(false);
+      if (!user) {
+        loadedProfileUserIdRef.current = null;
+        setIsLoading(false);
+      }
       return;
     }
 
     const loadId = ++profileLoadIdRef.current;
-    setIsLoading(true);
+    const isFirstProfileLoad = loadedProfileUserIdRef.current !== user.id;
+
+    // Only block the UI on the initial profile load (or user change).
+    // Token refresh on tab focus must not unmount forms or show a full-page loader.
+    if (isFirstProfileLoad) {
+      setIsLoading(true);
+    }
 
     void loadProfile(user).finally(() => {
       if (profileLoadIdRef.current === loadId) {
+        loadedProfileUserIdRef.current = user.id;
         setIsLoading(false);
       }
     });
@@ -259,6 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await supabase.auth.signOut({ scope: 'local' });
+    loadedProfileUserIdRef.current = null;
     setIsAuthenticated(false);
     setUser(null);
     setSession(null);

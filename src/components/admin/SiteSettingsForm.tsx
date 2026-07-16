@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { m } from 'framer-motion';
 import { Save, Upload, Globe, Home, Phone, Share2, Plus, Trash2, Crop, MapPin } from 'lucide-react';
 import { useSiteSettings } from '../../context/SiteSettingsContext';
+import { useFormDraft } from '../../hooks/useFormDraft';
+import { buildFormDraftKey } from '../../lib/formDraftStorage';
 import { uploadSiteAsset } from '../../lib/supabase';
 import { urlToObjectUrl } from '../../lib/cropImage';
 import ImageCropModal from './ImageCropModal';
@@ -32,9 +34,27 @@ export default function SiteSettingsForm() {
   const [savedOfficeLocation, setSavedOfficeLocation] = useState<LocationChangePayload | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
 
-  useEffect(() => { setForm(settings); }, [settings]);
+  const draftKey = buildFormDraftKey(['site-settings']);
+
+  const { clearDraft, draftRestored } = useFormDraft(
+    draftKey,
+    { form, activeTab, savedOfficeLocation },
+    {
+      enabled: !saving,
+      onRestore: (draft) => {
+        setForm(draft.form);
+        setActiveTab(draft.activeTab);
+        setSavedOfficeLocation(draft.savedOfficeLocation);
+      },
+    },
+  );
 
   useEffect(() => {
+    if (!draftRestored) setForm(settings);
+  }, [settings, draftRestored]);
+
+  useEffect(() => {
+    if (draftRestored) return;
     if (settings.office_latitude != null && settings.office_longitude != null) {
       setSavedOfficeLocation({
         latitude: settings.office_latitude,
@@ -42,7 +62,7 @@ export default function SiteSettingsForm() {
         address: settings.address,
       });
     }
-  }, [settings.office_latitude, settings.office_longitude, settings.address]);
+  }, [settings.office_latitude, settings.office_longitude, settings.address, draftRestored]);
 
   const update = <K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -132,6 +152,7 @@ export default function SiteSettingsForm() {
     setMessage(null);
     try {
       await saveSettings(form);
+      clearDraft();
       setMessage({ type: 'ok', text: 'Configuración guardada correctamente' });
     } catch (err) {
       console.error(err);

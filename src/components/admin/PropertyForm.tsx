@@ -10,6 +10,8 @@ import {
   updatePropertyMedia,
 } from '../../lib/supabase';
 import { useProperty } from '../../hooks/useProperties';
+import { useFormDraft } from '../../hooks/useFormDraft';
+import { buildFormDraftKey } from '../../lib/formDraftStorage';
 import { PROPERTY_TYPES, CURRENCIES, OPERATIONS, STATUS_OPTIONS } from '../../data/constants';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import PropertyAIAssistant from './PropertyAIAssistant';
@@ -49,6 +51,27 @@ const emptyProperty: Partial<Property> = {
   published: true,
 };
 
+type PropertyFormDraft = {
+  formData: Partial<Property>;
+  activeTab: 'general' | 'characteristics' | 'photos' | 'location' | 'video';
+  newAmenity: string;
+  newFeature: string;
+  savedLocation: LocationChangePayload | null;
+};
+
+function isPropertyFormEmpty(draft: PropertyFormDraft): boolean {
+  const { formData } = draft;
+  return (
+    !formData.title?.trim()
+    && !formData.short_description?.trim()
+    && !formData.full_description?.trim()
+    && !formData.city?.trim()
+    && !formData.neighborhood?.trim()
+    && (formData.photos?.length ?? 0) === 0
+    && (formData.videos?.length ?? 0) === 0
+  );
+}
+
 export default function PropertyForm() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -69,8 +92,26 @@ export default function PropertyForm() {
   >([]);
   const [savedLocation, setSavedLocation] = useState<LocationChangePayload | null>(null);
 
+  const draftKey = buildFormDraftKey(['property-form', isEditing ? id ?? 'edit' : 'new']);
+
+  const { clearDraft, draftRestored } = useFormDraft<PropertyFormDraft>(
+    draftKey,
+    { formData, activeTab, newAmenity, newFeature, savedLocation },
+    {
+      enabled: !saving,
+      isEmpty: isPropertyFormEmpty,
+      onRestore: (draft) => {
+        setFormData(draft.formData);
+        setActiveTab(draft.activeTab);
+        setNewAmenity(draft.newAmenity);
+        setNewFeature(draft.newFeature);
+        setSavedLocation(draft.savedLocation);
+      },
+    },
+  );
+
   useEffect(() => {
-    if (existingProperty) {
+    if (existingProperty && !draftRestored) {
       setFormData(existingProperty);
       if (existingProperty.latitude != null && existingProperty.longitude != null) {
         setSavedLocation({
@@ -84,10 +125,10 @@ export default function PropertyForm() {
         });
       }
     }
-  }, [existingProperty]);
+  }, [existingProperty, draftRestored]);
 
   useEffect(() => {
-    if (!isEditing && prefilled) {
+    if (!isEditing && prefilled && !draftRestored) {
       setFormData({ ...emptyProperty, ...prefilled });
       if (prefilled.latitude != null && prefilled.longitude != null) {
         setSavedLocation({
@@ -101,7 +142,7 @@ export default function PropertyForm() {
         });
       }
     }
-  }, [isEditing, prefilled]);
+  }, [isEditing, prefilled, draftRestored]);
 
   const syncLocationToForm = useCallback((location: LocationChangePayload) => {
     setFormData((prev) => ({
@@ -253,6 +294,7 @@ export default function PropertyForm() {
       };
 
       await saveProperty(data, isEditing ? id : undefined);
+      clearDraft();
       navigate('/admin/propiedades');
     } catch (err) {
       console.error('Error saving property:', err);

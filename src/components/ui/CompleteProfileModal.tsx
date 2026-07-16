@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Camera, Check, User, Phone, Mail, Loader2, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useProfileModal } from '../../context/ProfileModalContext';
+import { useFormDraft } from '../../hooks/useFormDraft';
+import { buildFormDraftKey } from '../../lib/formDraftStorage';
 import { completeUserProfile, uploadAvatar } from '../../lib/supabase';
 import { validateName, validatePhone } from '../../lib/validation';
 import DefaultAvatar from './DefaultAvatar';
@@ -65,8 +67,24 @@ export default function CompleteProfileModal() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const draftKey = buildFormDraftKey(['complete-profile', user?.id ?? 'anonymous']);
+
+  const { clearDraft, draftRestored } = useFormDraft(
+    draftKey,
+    { firstName, lastName, phone },
+    {
+      enabled: isOpen && saveState !== 'saving',
+      isEmpty: (draft) => !draft.firstName.trim() && !draft.lastName.trim() && !draft.phone.trim(),
+      onRestore: (draft) => {
+        setFirstName(draft.firstName);
+        setLastName(draft.lastName);
+        setPhone(draft.phone);
+      },
+    },
+  );
+
   useEffect(() => {
-    if (profile) {
+    if (profile && !draftRestored) {
       setFirstName(profile.first_name ?? profile.full_name?.split(' ')[0] ?? '');
       setLastName(profile.last_name ?? profile.full_name?.split(' ').slice(1).join(' ') ?? '');
       setPhone(profile.phone ?? '');
@@ -74,7 +92,7 @@ export default function CompleteProfileModal() {
         setAvatarPreview(profile.avatar_url ?? null);
       }
     }
-  }, [profile, avatarFile]);
+  }, [profile, avatarFile, draftRestored]);
 
   useEffect(() => {
     if (isOpen) {
@@ -162,6 +180,7 @@ export default function CompleteProfileModal() {
 
       await refreshProfile();
 
+      clearDraft();
       setSaveState('success');
       setTimeout(() => {
         closeProfileModal();

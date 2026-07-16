@@ -10,6 +10,8 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useProfileModal } from '../../context/ProfileModalContext';
 import { useFavorites } from '../../context/FavoritesContext';
+import { useFormDraft } from '../../hooks/useFormDraft';
+import { buildFormDraftKey } from '../../lib/formDraftStorage';
 import {
   getUserFavorites, getUserViewed, getUserInquiries,
   upsertUserProfile, uploadAvatar,
@@ -44,6 +46,23 @@ export default function UserProfile() {
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const profileDraftKey = buildFormDraftKey(['user-profile-settings', user?.id ?? 'anonymous']);
+
+  const { clearDraft: clearProfileDraft, draftRestored: profileDraftRestored } = useFormDraft(
+    profileDraftKey,
+    { editFirst, editLast, editPhone, editMode },
+    {
+      enabled: !saving,
+      isEmpty: (draft) => !draft.editMode && !draft.editFirst.trim() && !draft.editLast.trim() && !draft.editPhone.trim(),
+      onRestore: (draft) => {
+        setEditFirst(draft.editFirst);
+        setEditLast(draft.editLast);
+        setEditPhone(draft.editPhone);
+        setEditMode(draft.editMode);
+      },
+    },
+  );
+
   useEffect(() => {
     if (authLoading) return;
     if (!user) { navigate('/'); return; }
@@ -71,13 +90,13 @@ export default function UserProfile() {
 
   // Sync edit fields from profile
   useEffect(() => {
-    if (profile) {
+    if (profile && !profileDraftRestored) {
       setEditFirst(profile.first_name ?? profile.full_name?.split(' ')[0] ?? '');
       setEditLast(profile.last_name ?? profile.full_name?.split(' ').slice(1).join(' ') ?? '');
       setEditPhone(profile.phone ?? '');
       setAvatarPreview(profile.avatar_url ?? null);
     }
-  }, [profile]);
+  }, [profile, profileDraftRestored]);
 
   const handleRemoveFavorite = async (propertyId: string) => {
     try {
@@ -136,6 +155,7 @@ export default function UserProfile() {
         profile_completed: true,
       });
       await refreshProfile();
+      clearProfileDraft();
       setAvatarFile(null);
       setEditMode(false);
       setEditErrors({});

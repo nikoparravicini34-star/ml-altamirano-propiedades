@@ -12,6 +12,7 @@ import WhatsAppButton from './components/ui/WhatsAppButton';
 import CompleteProfileModal from './components/ui/CompleteProfileModal';
 import LoadingSpinner from './components/ui/LoadingSpinner';
 import { useSmoothScroll, scrollToTop } from './hooks/useSmoothScroll';
+import { useScrollRestoration } from './hooks/useScrollRestoration';
 import { pageVariants } from './lib/motion';
 import { getOAuthCallbackSnapshot, logAuthDebug } from './lib/authDebug';
 
@@ -96,6 +97,7 @@ function OAuthRedirectHandler() {
 
 function AppRoutes() {
   useSmoothScroll();
+  useScrollRestoration();
 
   return (
     <>
